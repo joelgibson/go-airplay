@@ -1,12 +1,12 @@
 package airplay
 
 import (
-	"errors"
-	"math/big"
-	"encoding/pem"
-	"crypto/x509"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"math/big"
 )
 
 const super_secret_key string = `-----BEGIN RSA PRIVATE KEY-----
@@ -47,7 +47,6 @@ func Decrypt(ctext []byte) []byte {
 	return out
 }
 
-
 func ApplyPrivRSA(ptext []byte) []byte {
 	pemblock, _ := pem.Decode([]byte(super_secret_key))
 	key, err := x509.ParsePKCS1PrivateKey(pemblock.Bytes)
@@ -60,8 +59,6 @@ func ApplyPrivRSA(ptext []byte) []byte {
 	}
 	return enc
 }
-
-
 
 // RSA Private signing found here: https://groups.google.com/forum/#!topic/golang-nuts/Vocj33WNhJQ
 var (

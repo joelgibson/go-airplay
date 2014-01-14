@@ -1,3 +1,19 @@
+# AirPlay Server
+
+At the moment, iTunes will connect (but not be able to play) to the server. I still don't
+have iOS ready to connect - something is happening with the Apple-Challenge Apple-Response
+there...
+
+To advertise the RAOP service,
+
+    $ clang reg.c && ./a.out
+
+Pressing enter will deregister the service and stop the program. To launch the server
+listening for connections,
+
+    $ go run serve.go
+
+
 
 ## RAOP TXT Record parameters
 
@@ -44,7 +60,7 @@ speaker. When iTunes did the OPTIONS call, it did not come with an Apple-Challen
 
 If we enabled encryption to none or RSA, `et=0,1`, then both iTunes and the iOS
 devices saw it. An Apple-Challenge was seen from both iTunes and iOS (iTunes needed
-a restart)
+a restart - once it challenges once sucessfully, it does not challenge the server again)
 
 ## Generating the Apple-Response from the Apple-Challenge
 
@@ -94,8 +110,6 @@ The message looks like this:
 The body seems to be a 16-byte messages, starting `FPLY`. I think this is a
 challenge-response thing. No-one on the internet (in a solid hour or two of
 googling) seems to have cracked it.
-
-I registered the RAOP service with the parameters
 
 
 [1] http://nto.github.io/AirPlay.html
