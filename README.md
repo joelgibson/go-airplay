@@ -112,5 +112,5 @@ challenge-response thing. No-one on the internet (in a solid hour or two of
 googling) seems to have cracked it.
 
 
-[1] http://nto.github.io/AirPlay.html
-[2] https://github.com/abrasive/shairport/blob/master/rtsp.c
+[1]: http://nto.github.io/AirPlay.html
+[2]: https://github.com/abrasive/shairport/blob/master/rtsp.c
