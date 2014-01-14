@@ -40,25 +40,26 @@ int main(int argc, char *argv[]) {
     "sm=false",
     "ek=1",
     NULL*/
+    "txtvers=1",
+    "pw=false",
     "tp=UDP",
     "sm=false",
     "ek=1",
-    "et=0,1",
     "cn=0,1",
     "ch=2",
     "ss=16",
-    "sr=44100",
+    "sr=44100",  // Sample rate
     "vn=3",
-    "txtvers=1",
-    "pw=false",
+    "et=0,1",
     NULL
   };
   char *txt_airplay_list[] = {
     "deviceid=00:19:E3:D9:31:2B",
-    "features=0x39f7",  // Features bitfield
+    //"features=0x39f7",  // Features bitfield
+    "features=0x7",
     //"pw=1", // Password protected
     "model=AppleTV2,1",
-    //"srcvers=130.14", Disable this to get rid of /fp-setup
+    //"srcvers=130.14", //Disable this to get rid of /fp-setup
     NULL
   };
   char txt_raop[1024];
@@ -84,7 +85,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   fprintf(stderr, "Successfully registered RAOP service!\n");
-  err = DNSServiceRegister(
+  /*err = DNSServiceRegister(
       &airplayRef,   // Service ref
       0,        // flags DnsServiceFlags
       0,        // interface index uint32_t
@@ -100,13 +101,13 @@ int main(int argc, char *argv[]) {
   if (err != kDNSServiceErr_NoError) {
     fprintf(stderr, "Could not register airplay service, code %d\n", err);
   }
-  fprintf(stderr, "Successfully registered airplay service!\n");
+  fprintf(stderr, "Successfully registered airplay service!\n");*/
   fprintf(stderr, "Waiting for you... ");
   getchar();
 
   fprintf(stderr, "Deregistering services.\n");
   DNSServiceRefDeallocate(raopRef);
-  DNSServiceRefDeallocate(airplayRef);
+  //DNSServiceRefDeallocate(airplayRef);
 
   return 0;
 }
