@@ -41,6 +41,7 @@ int main(int argc, char *argv[]) {
     "ek=1",
     NULL*/
     "txtvers=1",
+    //"md=0,1,2",       // Metadata types
     "pw=false",
     "tp=UDP",
     "sm=false",
