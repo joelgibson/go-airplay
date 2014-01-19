@@ -22,7 +22,7 @@ var aesiv []byte
 var fmtp []byte
 
 func writeUdp() {
-	f, err := os.Create("data.m4a")
+	f, err := os.Create("datafile")
 	if err != nil { panic(err) }
 	defer f.Close()
 
@@ -34,7 +34,7 @@ func writeUdp() {
 	if err != nil {
 		panic(err)
 	}
-
+/*
 	vlcaddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:1234");
 	if err != nil {
 		panic(err)
@@ -43,6 +43,7 @@ func writeUdp() {
 	if err != nil {
 		panic(err)
 	}
+	*/
 
 	buf := make([]byte, 1024*16)
 	last_seqno := 0
@@ -67,8 +68,9 @@ func writeUdp() {
 		//tstamp := int(packet[4])<<24 + int(packet[5]) << 16 + int(packet[6]) << 8 + int(packet[7])
 		//ssrc := packet[8:8+4]
 		audio := packet[8+4:]
+		f.Write([]byte{byte(len(audio)>>8), byte(len(audio)&0xff)})
 		f.Write(audio)
-		_, err = vlcconn.Write(packet)
+		//_, err = vlcconn.Write(packet)
 		if err != nil { panic(err) }
 		if seqno - last_seqno != 1 { fmt.Println("Blip: last", last_seqno, "next", seqno) }
 		last_seqno = seqno
