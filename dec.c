@@ -1,84 +1,70 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <AudioToolbox/AudioToolbox.h>
-#include "alac.h"
-#include <CoreAudio/CoreAudioTypes.h>
+//#include <CoreAudio/CoreAudioTypes.h>
 
-#define BUFSIZE (1024 * 32)
+#define NUMBUFS (8)
+#define BUFSIZE (1024 * 8)
 
 typedef unsigned char byte;
-
-UInt32 CalculateLPCMFlags (
-   UInt32 inValidBitsPerChannel,
-   UInt32 inTotalBitsPerChannel,
-   bool inIsFloat,
-   bool inIsBigEndian,
-   bool inIsNonInterleaved
-) {
-  inIsNonInterleaved = false;
-   return
-   (inIsFloat ? kAudioFormatFlagIsFloat : kAudioFormatFlagIsSignedInteger) |
-   (inIsBigEndian ? ((UInt32)kAudioFormatFlagIsBigEndian) : 0)             |
-   ((!inIsFloat && (inValidBitsPerChannel == inTotalBitsPerChannel)) ?
-   kAudioFormatFlagIsPacked : kAudioFormatFlagIsAlignedHigh)           |
-   (inIsNonInterleaved ? ((UInt32)kAudioFormatFlagIsNonInterleaved) : 0);
-}
-
-void FillOutASBDForLPCM (
-   AudioStreamBasicDescription *outASBD,
-   Float64 inSampleRate,
-   UInt32 inChannelsPerFrame,
-   UInt32 inValidBitsPerChannel,
-   UInt32 inTotalBitsPerChannel,
-   bool inIsFloat,
-   bool inIsBigEndian,
-   bool inIsNonInterleaved
-) {
-  inIsNonInterleaved = false;
-   outASBD->mSampleRate = inSampleRate;
-   outASBD->mFormatID = kAudioFormatLinearPCM;
-   outASBD->mFormatFlags =    CalculateLPCMFlags (
-   inValidBitsPerChannel,
-   inTotalBitsPerChannel,
-   inIsFloat,
-   inIsBigEndian,
-   inIsNonInterleaved
-   );
-   outASBD->mBytesPerPacket =
-   (inIsNonInterleaved ? 1 : inChannelsPerFrame) * (inTotalBitsPerChannel/8);
-   outASBD->mFramesPerPacket = 1;
-   outASBD->mBytesPerFrame =
-   (inIsNonInterleaved ? 1 : inChannelsPerFrame) * (inTotalBitsPerChannel/8);
-   outASBD->mChannelsPerFrame = inChannelsPerFrame;
-   outASBD->mBitsPerChannel = inValidBitsPerChannel;
-}
-
-int host_bigendian = 0;
 
 void fail(char *msg) {
   fprintf(stderr, "%s\n", msg);
   exit(1);
 }
+typedef struct ALACSpecificConfig {
+  uint32_t  frameLength;
+  uint8_t   compatibleVersion;
+  uint8_t   bitDepth;
+  uint8_t   pb;
+  uint8_t   mb;
+  uint8_t   kb;
+  uint8_t   numChannels;
+  uint16_t  maxRun;
+  uint32_t  maxFrameBytes;
+  uint32_t  avgBitRate;
+  uint32_t  sampleRate;
+} ALACSpecificConfig;
 
-const int numbufs = 10;
-AudioQueueBufferRef bufs[numbufs];
+AudioQueueBufferRef bufs[NUMBUFS];
 
-byte *data = NULL;
-int datapos = 0;
-int datalen = 0;
+FILE *inFile;
 AudioQueueRef outAQ;
 
+// This callback gets handed a queue element (inBuffer). It's job is to fill it up with packets
+// and send it off, or to stop playing if there are no more. Since ALAC has variable size
+// packets, we need to store that info too.
 void inCallbackProc(void *inUserData, AudioQueueRef inAQ, AudioQueueBufferRef inBuffer) {
-  // This gets called when inBuffer has been acquired by the queue.
-  if (datalen - datapos < BUFSIZE) {
+  int bufpos = 0;
+  int packets = 0;
+  while (!feof(inFile)) {
+    // Find the size of the next packet
+    byte sizeb[2];
+    fread(sizeb, 2, 1, inFile);
+    int psize = (sizeb[0]<<8) + sizeb[1];
+    if (bufpos + psize > BUFSIZE) {
+      fseek(inFile, -2, SEEK_CUR);
+      break;
+    }
+    fread(&inBuffer->mAudioData[bufpos], psize, 1, inFile);
+    inBuffer->mPacketDescriptions[packets].mStartOffset = bufpos;
+    inBuffer->mPacketDescriptions[packets].mVariableFramesInPacket = 0; // Not variable
+    inBuffer->mPacketDescriptions[packets].mDataByteSize = psize;
+
+    packets++;
+    bufpos += psize;
+  }
+  if (bufpos == 0) {
     AudioQueueStop(outAQ, false);
     return;
   }
 
-  printf("Queueing %d\n", datapos);
-  memcpy(inBuffer->mAudioData, &data[datapos], BUFSIZE);
-  inBuffer->mAudioDataByteSize = BUFSIZE;
-  datapos += BUFSIZE;
+  inBuffer->mAudioDataByteSize = bufpos;
+  inBuffer->mPacketDescriptionCount = packets;
+
+  printf("Queueing a buffer of %d bytes containing %d packets\n", bufpos, packets);
+
+  // Enqueue: the (0, NULL) means read the mPacketDescriptions member
   OSStatus err = AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
   if (err) {
     fprintf(stderr, "Could not enqueue: %d\n", err);
@@ -87,60 +73,20 @@ void inCallbackProc(void *inUserData, AudioQueueRef inAQ, AudioQueueBufferRef in
 }
 
 int main() {
-  // Read the file into memory (20MB should be enough)
-  byte *infile = malloc(sizeof(byte) * 1024*1024*20);
-  FILE *fp = fopen("datafile", "r");
-  if (fp == NULL)
-    fail("Could not open file.");
-  int pos = 0, c;
-  while ((c = fgetc(fp)) != EOF)
-    infile[pos++] = c;
-  int filelen = pos;
-
+  // This is from the ANNOUNCE call
 	int fmtp[] = {96, 352, 0, 16, 40, 10, 14, 2, 255, 0, 0, 44100};
-	int frame_size = fmtp[1];
-	alac_file *alac;
-	frame_size = fmtp[1]; // stereo samples
-    int sampling_rate = fmtp[11];
 
-    int sample_size = fmtp[3];
-    if (sample_size != 16)
-       fail("only 16-bit samples supported!");
-
-    alac = alac_create(sample_size, 2);
-    if (!alac)
-			fail("Not alac");
-
-    alac->setinfo_max_samples_per_frame = frame_size;
-    alac->setinfo_7a =      fmtp[2];
-    alac->setinfo_sample_size = sample_size;
-    alac->setinfo_rice_historymult = fmtp[4];
-    alac->setinfo_rice_initialhistory = fmtp[5];
-    alac->setinfo_rice_kmodifier = fmtp[6];
-    alac->setinfo_7f =      fmtp[7];
-    alac->setinfo_80 =      fmtp[8];
-    alac->setinfo_82 =      fmtp[9];
-    alac->setinfo_86 =      fmtp[10];
-    alac->setinfo_8a_rate = fmtp[11];
-    alac_allocate_buffers(alac);
-
-	// Destination buffer
-	data = malloc(sizeof(byte) * 1024*1024*20);
-	int destpos = 0;
-	pos = 0;
-
-  // Audio Queue
+  // Create Audio Queue for ALAC
   AudioStreamBasicDescription inFormat = {0};
-  FillOutASBDForLPCM(
-      &inFormat,
-      44100,
-      2, // channels per frame
-      16, // bits per channel
-      16, // bits per channel
-      false, // is float?
-      false, // is big endian?
-      false // is interleaved?
-  );
+  inFormat.mSampleRate = fmtp[11];
+  inFormat.mFormatID = kAudioFormatAppleLossless;
+  inFormat.mFormatFlags = 0; // ALAC uses no flags
+  inFormat.mBytesPerPacket = 0; // Variable size (must use AudioStreamPacketDescription)
+  inFormat.mFramesPerPacket = fmtp[1];
+  inFormat.mBytesPerFrame = 0; // Compressed
+  inFormat.mChannelsPerFrame = 2; // Stero TODO: get from fmtp?
+  inFormat.mBitsPerChannel = 0; // Compressed
+  inFormat.mReserved = 0;
   
   OSStatus err = AudioQueueNewOutput(
       &inFormat,
@@ -155,27 +101,29 @@ int main() {
     fail((char *)&err);
   }
 
+  // Need to set the magic cookie too (tail fmtp)
+  ALACSpecificConfig cookie = {htonl(352), 0, 16, 40, 10, 14, 2, 255, 0, 0, htonl(44100)};
+  err = AudioQueueSetProperty(
+    outAQ,
+    kAudioQueueProperty_MagicCookie,
+    &cookie,
+    sizeof(ALACSpecificConfig));
+  if (err) {
+    fprintf(stderr, "Could not set the maagic cookie\n");
+    fail((char *)&err);
+  }
 
+  // Open the input file
+  inFile = fopen("datafile", "r");
+  if (inFile == NULL)
+    fail("Could not open file");
 
-	while (pos < filelen) {
-		int framelen = (infile[pos]<<8) + infile[pos+1];
-		pos += 2;
-		int nwrote = 1024*1024*20;
-		alac_decode_frame(alac, &infile[pos], &data[destpos], &nwrote);
-    destpos += nwrote;
-		pos += framelen;
-		printf("In: %d, Out: %d\n", framelen, nwrote);
-	}
-  datalen = destpos;
-
-
-	fp = fopen("out.pcm", "w");
-	printf("ssize: %d, srate: %d\n", sample_size, sampling_rate);
-	fwrite(data, datalen, 1, fp);
-	fclose(fp);
-
-  for (int i = 0; i < numbufs; i++) {
-    err = AudioQueueAllocateBuffer(outAQ, BUFSIZE, &bufs[i]);
+  for (int i = 0; i < NUMBUFS; i++) {
+    err = AudioQueueAllocateBufferWithPacketDescriptions(
+        outAQ,
+        BUFSIZE, // Size of audio buffer
+        BUFSIZE, // Number of packet descriptions (FAR too many)
+        &bufs[i]);
     if (err) {
       fprintf(stderr, "Could not allocate audio queue buffer\n");
       fail((char *)&err);
@@ -189,12 +137,12 @@ int main() {
     fail((char *)&err);
   }
 
-
   err = AudioQueuePrime(outAQ, 0, NULL);
   if (err) {
     fprintf(stderr, "Error priming: %d\n", err);
     fail((char *)&err);
   }
+  
   err = AudioQueueStart(outAQ, NULL);
   if (err) {
     fprintf(stderr, "Could not start playing %d\n", err);

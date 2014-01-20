@@ -34,16 +34,6 @@ func writeUdp() {
 	if err != nil {
 		panic(err)
 	}
-/*
-	vlcaddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:1234");
-	if err != nil {
-		panic(err)
-	}
-	vlcconn, _ := net.DialUDP("udp", nil, vlcaddr)
-	if err != nil {
-		panic(err)
-	}
-	*/
 
 	buf := make([]byte, 1024*16)
 	last_seqno := 0
