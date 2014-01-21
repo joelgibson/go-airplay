@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <AudioToolbox/AudioToolbox.h>
-//#include <CoreAudio/CoreAudioTypes.h>
 
 #define NUMBUFS (8)
 #define BUFSIZE (1024 * 8)
@@ -102,7 +101,11 @@ int main() {
   }
 
   // Need to set the magic cookie too (tail fmtp)
-  ALACSpecificConfig cookie = {htonl(352), 0, 16, 40, 10, 14, 2, 255, 0, 0, htonl(44100)};
+  ALACSpecificConfig cookie = {htonl(352), 0, 16, 40, 10, 14, 2, htons(255), 0, 0, htonl(44100)};
+  unsigned char *cookieBytes = (unsigned char *)&cookie;
+  for (int i = 0; i < sizeof(cookie); i++)
+    printf("%02x", cookieBytes[i]);
+  printf("\n");
   err = AudioQueueSetProperty(
     outAQ,
     kAudioQueueProperty_MagicCookie,

@@ -10,7 +10,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
-	"os"
 	"strconv"
 )
 
@@ -19,13 +18,9 @@ const OPTS_RAOP string = "ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIO
 // Globals, because I can
 var aeskey []byte
 var aesiv []byte
-var fmtp []byte
+var fmtp []int
 
 func writeUdp() {
-	f, err := os.Create("datafile")
-	if err != nil { panic(err) }
-	defer f.Close()
-
 	udpaddr, err := net.ResolveUDPAddr("udp", ":6000")
 	if err != nil {
 		panic(err)
@@ -34,6 +29,13 @@ func writeUdp() {
 	if err != nil {
 		panic(err)
 	}
+	defer func() {
+		fmt.Println("closing...")
+		udpconn.Close()
+	}()
+
+	packetchan := make(chan []byte, 1000)
+	go CreateALACPlayer(fmtp, packetchan)
 
 	buf := make([]byte, 1024*16)
 	last_seqno := 0
@@ -58,12 +60,14 @@ func writeUdp() {
 		//tstamp := int(packet[4])<<24 + int(packet[5]) << 16 + int(packet[6]) << 8 + int(packet[7])
 		//ssrc := packet[8:8+4]
 		audio := packet[8+4:]
-		f.Write([]byte{byte(len(audio)>>8), byte(len(audio)&0xff)})
-		f.Write(audio)
 		//_, err = vlcconn.Write(packet)
 		if err != nil { panic(err) }
 		if seqno - last_seqno != 1 { fmt.Println("Blip: last", last_seqno, "next", seqno) }
 		last_seqno = seqno
+
+		send := make([]byte, len(audio))
+		copy(send, audio)
+		packetchan <- send
 	}
 }
 
@@ -154,7 +158,7 @@ func handler(conn net.Conn) {
 					aesiv64 = line[len(aesivhead):]
 				}
 				if idx := strings.Index(line, fmtphead); idx == 0 {
-					fmtp := make([]int, 12)
+					fmtp = make([]int, 12)
 					for i, x := range strings.Fields(line[len(fmtphead):]) {
 						fmtp[i], err = strconv.Atoi(x)
 						if err != nil { panic(err) }
@@ -193,6 +197,14 @@ func handler(conn net.Conn) {
 
 			go writeUdp()
 		}
+
+		if method == "TEARDOWN" {
+			resp += "RTSP/1.0 200 OK\r\n"
+			resp += "CSeq: " + headers["CSeq"] + "\r\n"
+			resp += "Session: 1\r\n"
+			resp += "\r\n"
+		}
+
 
 		if method == "SET_PARAMETER" || method == "FLUSH" || method == "TEARDOWN" {
 			resp += "RTSP/1.0 200 OK\r\n"
