@@ -1,8 +1,6 @@
 # AirPlay Server
 
-At the moment, iTunes will connect (but not be able to play) to the server. I still don't
-have iOS ready to connect - something is happening with the Apple-Challenge Apple-Response
-there...
+At the moment, you can start the RAOP advertisment, and start the server, and then connect from iTunes/iOS to play music. Multiple connections (or even disconnect and reconnect) are not handled.
 
 To advertise the RAOP service,
 
@@ -13,11 +11,55 @@ listening for connections,
 
     $ go run serve.go
 
+## A little bit of history
+
+### AirTunes
+
+AirTunes came out as a strictly audio-only protocol, which allowed computers running iTunes, and later wi-fi enabled
+iOS devices to stream audio to any AirTunes server. This service is advertised via the `_raop._tcp` subdomain in
+zeroconf, along with a TXT record detailing the server's audio capabilities, along with whether the server is
+password-protected or not. A client connecting to a server includes an "Apple-Challenge" header, a random (?) 18-byte
+token, which the server has to combine with its MAC and IP address and then encrypt using an RSA private key, and
+send back as an "Apple-Response" header. Once this challenge has been met, the client gives the server an RSA-encrypted
+AES key, which the audio packet payloads are encrypted with for the rest of the connection. The server uses its private
+key to decrypt the AES key, and then the rest is history (assuming you know how RTP works).
+
+In 2004, [Jon Lech Johansen](http://en.wikipedia.org/wiki/Jon_Lech_Johansen) (writer of DeCSS) published a client
+for AirTunes, [JustePort](http://nanocr.eu/software/justeport/), using an RSA public key which (I think) he found in
+the iTunes binary. This allowed anybody to stream music to an AirTunes server, but did not allow people to become an
+AirTunes server, since the private key was still missing.
+
+In 2011, James Laird published [shairport], an AirTunes server, using the RSA private key he had extracted from an
+AirPort Express. Now both the private and public keys are available for people to implement their own AirTunes services
+(as I am doing).
+
+### AirPlay
+
+Everything so far has been strictly about the RAOP service. In 2010, Apple announced AirPlay, which would allow people
+to stream movies and photos in addition to audio, to AirPlay devices (such as the Apple TV). AirPlay comes in as a second
+service alongside the RAOP service, advertised via the `_airplay._tcp` subdomain in zeroconf. Displaying photos,
+slideshows, and videos across this is rather open (there is no encryption of any sort, or challenge-response headers),
+and well-documented at [nto].
+
+Advertising the `_airplay._tcp` in addition to `_raop._tcp` causes iOS clients to authenticate differently. I need to
+explore more about this.
+
+### AirPlay Mirroring
+
+In 2011, Intel's Sandy Bridge (and onwards) processors enabled real-time video encoding and decoding, and AirPlay
+Mirroring was released, which allowed Macs (from 2011 onwards) to mirror their displays to an Apple TV. iOS devices are
+also able to mirror their displays to an Apple TV. The service is advertised on the `_airplay._tcp` TXT record, by
+setting relevant bits in the features bitfield.
+
+At the moment, there is no known open-source implementation of this protocol. However, there are commercial applications
+which can do this, such as [AirServer](http://www.airserver.com/), which acts as a server,
+[AirParrot](http://www.airsquirrels.com/airparrot/), which acts as a client, and [rplay](http://rplay.doit.org/), another
+server, aimed at embedded devices (Raspberry Pi).
 
 
 ## RAOP TXT Record parameters
 
-Most stuff here is duplicated from [1], I'm just listing them to separate the
+Most stuff here is duplicated from [nto], I'm just listing them to separate the
 audio configuration stuff from the authentication/encryption stuff.
 
 Non-authentication parameters:
@@ -26,20 +68,19 @@ Non-authentication parameters:
 * `cn=0,1,2,3` Available codecs (PCM, ALAC, AAC, AAC ELD).
 * `sr=44100` Audio sample rate.
 * `ss=16` Audio sample size.
-* `tp=UDP` Transport (Investigate...)
+* `tp=UDP` Transport (Investigate... what does TCP do?)
 
 Authentication parameters:
 * `et=0,1,3,4,5` Supported encryption types. (0: None, 1: RSA (Airport Express),
   3: FairPlay, 4: MFiSAP, 5: FairPlay SAPv2.5)
-* `md=0,1,2` Metadata type (not sure if this makes the iPhone want to connect
-  via Fairplay). (0: text, 1: artwork, 2: progress)
+* `md=0,1,2` Metadata type. It seems that if this is specified, then clients will send over data. (0: text, 1: artwork, 2: progress)
 * `pw=false` Do we require a password?
 * `vs=130.14` Server version (definitely makes the iPhone consider things differently)
 * `am=AppleTV2,1` Device Model, (Speaker reports as `AirPort4,107`)
 
 Unknown:
-* `ek=1` ???
-* `vn=3` ???
+* `ek=1` ??? (Perhaps indicates that encryption will be used, "Encryption Key")
+* `vn=3` ??? (Sub-version number? Try changing down and seeing headers?)
 
 Testing: Using the following set of basic headers:
 
@@ -78,20 +119,32 @@ There is no request body. The Apple-Challenge field is a base64 encoded 16 byte
 (there may be < 16 bytes sometimes?)
 sequence (iTunes appears to omit the padding on the end, while iOS does not). An
 Apple-Response header has to be sent back along with the OPTIONS response. To
-create the Apple-Response, see [2], steps outlined below:
+create the Apple-Response, see [shairport], steps outlined below:
 
-   * Allocate a buffer.
-   * Write in the decoded Apple-Challenge bytes.
-   * Write in the 16-byte IPv6 or 4-byte IPv4 address (network byte order).
-   * Write in the 6-byte Hardware address of the network interface (See note).
-   * Either trim or pad with 0's to 32 bytes long.
-   * Encrypt the 32 bytes using the RSA private key extracted in [2].
-   * Base64 encode the ciphertext, trim trailing '=' signs, and send back.
+* Allocate a buffer.
+* Write in the decoded Apple-Challenge bytes.
+* Write in the 16-byte IPv6 or 4-byte IPv4 address (network byte order).
+* Write in the 6-byte Hardware address of the network interface (See note).
+* If the buffer has <32 bytes written, pad with 0's up to 32 bytes.
+* Encrypt the buffer using the RSA private key extracted in [shairport].
+* Base64 encode the ciphertext, trim trailing '=' signs, and send back.
 
 Note: iTunes seems to think your hardware address is what you say it is when you
 publish the `_raop._tcp` name.
 
+## TODO
 
+* Structure program well, so that clients can connect, reconnect, disconnect
+  without resources going wonky.
+* Move service registration from `reg.c` into main program.
+* Add some command line flags for different modes of "sniffing around" (print out headers,
+  indicate stream being recieved without actually doing anything).
+* Handle more audio codecs, investigate whether codecs can be forced, and on what media.
+  The other audio parameters (channels, sample rate, sample size) can happen later. If we
+  turn off encryption, will anything play to us?
+* Figure out those mystery RAOP TXT records.
+* Implement AirPlay stuff (how do we display video/photos?)
+* Try to get mirroring working (this would be a total win, probably won't happen).
 
 
 ## Fairplay (blocked)
@@ -111,6 +164,15 @@ The body seems to be a 16-byte messages, starting `FPLY`. I think this is a
 challenge-response thing. No-one on the internet (in a solid hour or two of
 googling) seems to have cracked it.
 
+## References/Sources
 
-[1]: http://nto.github.io/AirPlay.html
-[2]: https://github.com/abrasive/shairport/blob/master/rtsp.c
+* Fairly complete documentation of RTSP and AirPlay protocol: [nto]
+* A little extra documentation: [airtunes2]
+* AirTunes server implementation, including private key: [shairport]
+* Alac decoder implementation: [alac]
+
+
+[nto]: http://nto.github.io/AirPlay.html
+[shairport]: https://github.com/abrasive/shairport
+[airtunes2]: http://git.zx2c4.com/Airtunes2/about/
+[alac]: http://crazney.net/programs/itunes/alac.html
