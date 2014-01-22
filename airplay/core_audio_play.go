@@ -1,6 +1,5 @@
 package airplay
 
-// #cgo CFLAGS: -std=c99
 // #cgo LDFLAGS: -framework AudioToolbox
 // #include <stdio.h>
 // #include <stdlib.h>

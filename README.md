@@ -1,15 +1,11 @@
 # AirPlay Server
 
-At the moment, you can start the RAOP advertisment, and start the server, and then connect from iTunes/iOS to play music. Multiple connections (or even disconnect and reconnect) are not handled.
+To run the server, 
 
-To advertise the RAOP service,
+    $ CC=clang go run serve.go
 
-    $ clang reg.c && ./a.out
-
-Pressing enter will deregister the service and stop the program. To launch the server
-listening for connections,
-
-    $ go run serve.go
+You can check the `-help` flag for more information (turn on debugging output, etc). At the moment you can only
+connect once, for one audio session. (Extra audio sessions will panic and quit).
 
 ## A little bit of history
 

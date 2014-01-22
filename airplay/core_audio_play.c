@@ -1,5 +1,4 @@
-#include <AudioToolbox/AudioToolbox.h>
-#include "core_audio_play.h"
+#include "_cgo_export.h"
 
 int32_t setup_queue(
 	ALACMagicCookie cookie,
