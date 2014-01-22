@@ -6,8 +6,8 @@ import (
 )
 
 // Get the bytes of an IP address from a net.Conn
-func GetIP(conn net.Conn) net.IP {
-	straddr := conn.LocalAddr().String()
+func GetIP(addr net.Addr) net.IP {
+	straddr := addr.String()
 	host, _, _ := net.SplitHostPort(straddr)
 	idx := strings.Index(host, "%")
 	if idx >= 0 {
@@ -27,9 +27,9 @@ func GetIP(conn net.Conn) net.IP {
 }
 
 // Get the bytes of a MAC address from a net.Conn
-func GetMAC(conn net.Conn) net.HardwareAddr {
+func GetMAC(addr net.Addr) net.HardwareAddr {
 	ifaces, err := net.Interfaces()
-	ip := GetIP(conn)
+	ip := GetIP(addr)
 	if err != nil {
 		panic("Cannot access interfaces")
 	}

@@ -62,14 +62,12 @@ func Go_callback(playerInfo unsafe.Pointer, queue C.AudioQueueRef, buffer C.Audi
 	buffer.mPacketDescriptionCount = C.UInt32(npackets)
 
 	C.AudioQueueEnqueueBuffer(queue, buffer, 0, (*C.AudioStreamPacketDescription)(nil))
-	fmt.Println(npackets, "packets eaten")
 }
 
 
 func CreateALACPlayer(fmtp []int, packetsinloc chan []byte) error {
 	packetsin = packetsinloc
 	cookie := magicCookieFromFmtp(fmtp)
-	fmt.Println("Go: Made cookie")
 	buflen := uint32(1024*8)
 	numbufs := uint32(8);
 	numpacks := uint32(20);

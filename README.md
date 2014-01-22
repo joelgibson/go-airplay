@@ -60,7 +60,8 @@ server, aimed at embedded devices (Raspberry Pi).
 ## RAOP TXT Record parameters
 
 Most stuff here is duplicated from [nto], I'm just listing them to separate the
-audio configuration stuff from the authentication/encryption stuff.
+audio configuration stuff from the authentication/encryption stuff. This will hopefully
+end up all documented in the code.
 
 Non-authentication parameters:
 * `txtvers=1` Always 1.
@@ -125,18 +126,33 @@ create the Apple-Response, see [shairport], steps outlined below:
 * Write in the decoded Apple-Challenge bytes.
 * Write in the 16-byte IPv6 or 4-byte IPv4 address (network byte order).
 * Write in the 6-byte Hardware address of the network interface (See note).
-* If the buffer has <32 bytes written, pad with 0's up to 32 bytes.
+* If the buffer has less than 32 bytes written, pad with 0's up to 32 bytes.
 * Encrypt the buffer using the RSA private key extracted in [shairport].
 * Base64 encode the ciphertext, trim trailing '=' signs, and send back.
 
 Note: iTunes seems to think your hardware address is what you say it is when you
 publish the `_raop._tcp` name.
 
+## RTSP Session
+
+After restarting iTunes, a typical Airtunes RTSP session looks like this:
+
+* User (not playing music) clicks on AirTunes device.
+* iTunes requests the `OPTIONS` method, loaded with an `Apple-Challenge`
+  header. If this is answered incorrectly, iTunes will display an error message
+  to the user and not enable AirTunes. If this is answered correctly, the AirTunes
+  blue active symbol is active. In  both cases, iTunes closes the TCP connection afterwards.
+* The user starts to play some music. An `ANNOUNCE` is sent, about the audio and encryption
+  parameters. Then a `SETUP` call to arrange ports. A `RECORD` call then signals that the audio
+  session is starting. After that, two `SET_PARAMETER` calls, for volume (the same volume).
+* If the user does nothing now, an `OPTIONS` call is made every 15 seconds, without any
+  Apple-Challenge header.
+* If the user skips a song, a `FLUSH` call is made.
+
 ## TODO
 
 * Structure program well, so that clients can connect, reconnect, disconnect
   without resources going wonky.
-* Move service registration from `reg.c` into main program.
 * Add some command line flags for different modes of "sniffing around" (print out headers,
   indicate stream being recieved without actually doing anything).
 * Handle more audio codecs, investigate whether codecs can be forced, and on what media.
