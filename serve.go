@@ -130,7 +130,6 @@ func handler(conn net.Conn) {
 				for len(ptext) < 0x20 {
 					ptext = append(ptext, 0)
 				}
-				ptext = ptext[:0x20]
 				ctext := ApplyPrivRSA(ptext)
 				c64 := base64.StdEncoding.EncodeToString(ctext)
 				if strings.Index(challenge, "=") < 0 {
