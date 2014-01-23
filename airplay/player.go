@@ -39,10 +39,6 @@ func writeUdp(aesiv, aeskey []byte, fmtp []int) {
 			todec = todec[aes.BlockSize:]
 		}
 
-		//seqno := int(packet[2])*16 + int(packet[3])
-		//if seqno-last_seqno != 1 {
-		//	fmt.Println("Blip: last", last_seqno, "next", seqno)
-		//}
 		send := make([]byte, len(audio))
 		copy(send, audio)
 		packetchan <- send

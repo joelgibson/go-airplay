@@ -136,19 +136,17 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 				return
 			}
 			if rsaaeskey64, ok := atags["rsaaeskey"]; ok {
-				for len(rsaaeskey64)%4 != 0 { rsaaeskey64 += "=" }
-				rsaaeskey, err := base64.StdEncoding.DecodeString(rsaaeskey64)
+				aeskey, err = aeskeyFromRsa(rsaaeskey64)
 				if err != nil {
 					log.Println("Error while decoding RSA AES key:", err)
 					return
 				}
-				aeskey = Decrypt(rsaaeskey)
 			} else {
 				log.Println("No AES key found.")
 				return
 			}
 			if aesiv64, ok := atags["aesiv"]; ok {
-				for len(aesiv64)%4 != 0 { aesiv64 += "=" }
+				aesiv64 = base64pad(aesiv64)
 				aesiv, err = base64.StdEncoding.DecodeString(aesiv64)
 				if err != nil {
 					log.Println("Error while decoding RSA AES iv:", err)
@@ -166,12 +164,12 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 		case "SETUP":
 			resp.headers["Transport"] = "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;"
 			resp.headers["Transport"] += "server_port=6000;control_port=6001;timing_port=6002"
-			resp.headers["Session"] = "1"
+			resp.headers["Session"] = "1" // This is necessary (why?)
 		case "RECORD":
 			resp.headers["Audio-Latency"] = "2205"
 			go writeUdp(aesiv, aeskey, fmtp)
 		case "TEARDOWN":
-			resp.headers["Session"] = "1"
+			resp.headers["Session"] = "1" // Is _this_ necessary?
 		case "FLUSH":
 			// Message player
 		case "SET_PARAMETER":
