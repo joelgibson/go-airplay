@@ -1,5 +1,8 @@
 # AirPlay Server
 
+The server only works on OSX at the moment, since it uses mDNSResponder as its DNS-SD program, and Core Audio
+as its audio player.
+
 To run the server, 
 
     $ CC=clang go run serve.go

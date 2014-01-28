@@ -171,6 +171,16 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 		case "TEARDOWN":
 			resp.headers["Session"] = "1" // Is _this_ necessary?
 		case "FLUSH":
+			// There is a header like "RTP-Info: seq=25639;rtptime=4037478127". We can probably
+			// flush the RTP packets up to there. Try to extract that number.
+			seq := -1
+			if info, ok := req.headers["RTP-Info"]; ok {
+				if idx := strings.Index(info, "seq="); idx >= 0 {
+					if no, err := strconv.Atoi(line[idx:strings.Index(line[idx:], ";")]); err != nil {
+							seq = no
+					}
+				}
+			}
 			// Message player
 		case "SET_PARAMETER":
 			// Volume? Message player.
