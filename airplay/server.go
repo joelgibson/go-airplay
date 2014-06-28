@@ -27,11 +27,13 @@ var txt map[string]string = map[string]string{
 	"et":      "0,1",
 }
 
+var iface *net.Interface
+
 // ServeAirtunes will start advertising an RAOP service, and start listening for
 // incoming connections, calling the player in a new goroutine when appropriate.
 func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	address := ":49152"
-	ifacename := "en1"
+	ifacename := "en2"
 
 	// Try to grab publish information
 	_, portstr, err := net.SplitHostPort(address)
@@ -42,7 +44,7 @@ func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	if err != nil {
 		return err
 	}
-	iface, err := net.InterfaceByName(ifacename)
+	iface, err = net.InterfaceByName(ifacename)
 	if err != nil {
 		return err
 	}
@@ -57,7 +59,7 @@ func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	log.Println("Service", raopName, "registered on address", address)
 
 	// Bind the port
-	ln, err := net.Listen("tcp", address)
+	ln, err := net.Listen("tcp4", address)
 	if err != nil {
 		return err
 	}
@@ -68,10 +70,10 @@ func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	for {
 		id := strconv.Itoa(rand.Int())
 		conn, err := ln.Accept()
+		log.Println("accepted connection!")
 		if err != nil {
 			return err
 		}
 		go handler(id, conn)
 	}
 }
-
