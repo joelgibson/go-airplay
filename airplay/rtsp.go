@@ -176,12 +176,15 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 			seq := -1
 			if info, ok := req.headers["RTP-Info"]; ok {
 				if idx := strings.Index(info, "seq="); idx >= 0 {
-					if no, err := strconv.Atoi(line[idx:strings.Index(line[idx:], ";")]); err != nil {
+					if no, err := strconv.Atoi(info[idx:strings.Index(info, ";")]); err != nil {
 							seq = no
 					}
 				}
 			}
-			// Message player
+
+			// Should flush the buffer here?
+			Debug.Println("Seq:", seq);
+
 		case "SET_PARAMETER":
 			// Volume? Message player.
 		default:
