@@ -3,6 +3,7 @@ package airplay
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -44,6 +45,10 @@ func NewSession(aesiv, aeskey []byte, fmtp []int) (s *Session, err error) {
 	return
 }
 
+func (s *Session) Flush() {
+	s.player.Flush()
+}
+
 func (s *Session) Close() {
 	log.Println("close")
 	s.udpconn.Close()
@@ -63,6 +68,9 @@ func (s *Session) loop() {
 			return
 		}
 		packet := buf[:n]
+		sequence := binary.BigEndian.Uint16(packet[2:])
+		_ = sequence
+		//		log.Println(sequence)
 		audio := packet[12:]
 		todec := audio
 		block, err := aes.NewCipher(s.aeskey)

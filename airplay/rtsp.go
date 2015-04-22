@@ -86,7 +86,7 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 		if _, ok := req.headers["Apple-Challenge"]; ok {
 			present = "Apple-Challenge present"
 		}
-		log.Println(id, "-", req.method, req.uri, req.proto, present)
+		log.Println(id, "-", req.method, req.uri, req.proto, string(req.body), present)
 		Debug.Print("From client:\n", string(req.data))
 
 		// Let's just auto-reply to any challenge that comes our way.
@@ -105,12 +105,11 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 		// during connection setup.
 		switch req.method {
 		case "OPTIONS":
-			// methods := make([]string, 0)
-			// for method := range knownMethods {
-			// 	methods = append(methods, method)
-			// }
-			// sort.Strings(methods)
-			resp.headers["Public"] = "ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER" //strings.Join(methods, ", ")
+			methods := make([]string, 0)
+			for method := range knownMethods {
+				methods = append(methods, method)
+			}
+			resp.headers["Public"] = strings.Join(methods, " ")
 		case "ANNOUNCE":
 			// Pull all of the a=xxx:yyyyy tags from the body
 			atags := make(map[string]string)
@@ -194,7 +193,8 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 
 			// Should flush the buffer here?
 			Debug.Println("Seq:", seq)
-
+			s.player.Flush()
+			resp.headers["Session"] = "1" // Is _this_ necessary?
 		case "SET_PARAMETER":
 			// Volume? Message player.
 		default:

@@ -36,7 +36,7 @@ import (
 
 const (
 	alac_buffers     = 8
-	alac_buffer_size = 1024 * 8
+	alac_buffer_size = 4 * 1024
 	alac_num_packets = 20
 )
 
@@ -70,6 +70,7 @@ func magicCookieFromFmtp(fmtp []int) C.ALACMagicCookie {
 
 //export Go_callback
 func Go_callback(userdata unsafe.Pointer, queue C.AudioQueueRef, buffer C.AudioQueueBufferRef) {
+	log.Println("Go_callback")
 	p := (*ALACPlayer)(userdata)
 	audioData := ((*[1 << 30]byte)(unsafe.Pointer(buffer.mAudioData)))[:buffer.mAudioDataBytesCapacity]
 	pktDescs := (*[1 << 30]C.AudioStreamPacketDescription)(unsafe.Pointer(buffer.mPacketDescriptions))[:buffer.mPacketDescriptionCapacity]
@@ -87,8 +88,13 @@ func Go_callback(userdata unsafe.Pointer, queue C.AudioQueueRef, buffer C.AudioQ
 		pktDescs[npackets].mVariableFramesInPacket = C.UInt32(int32(0))
 		upto = upto[len(p.peeked):]
 		npackets++
-		if p.running {
+		for p.running {
 			p.peeked = <-p.packetsin
+			if p.peeked == nil {
+				C.AudioQueueFlush(p.queue)
+				continue
+			}
+			break
 		}
 	}
 	buffer.mAudioDataByteSize = C.UInt32(len(audioData) - len(upto))
@@ -187,6 +193,9 @@ func (p *ALACPlayer) Enqueue(data []byte) error {
 	return nil
 }
 
+func (p *ALACPlayer) Flush() {
+	//p.Enqueue(nil)
+}
 func CreateALACPlayer(fmtp []int) (*ALACPlayer, error) {
 	var p ALACPlayer
 	p.packetsin = make(chan []byte, 1000)
