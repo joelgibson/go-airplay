@@ -32,7 +32,7 @@ var iface *net.Interface
 // ServeAirtunes will start advertising an RAOP service, and start listening for
 // incoming connections, calling the player in a new goroutine when appropriate.
 func ServeAirTunes(name string, handler func(string, net.Conn)) error {
-	address := ":49152"
+	address := ":49153"
 	ifacename := "en2"
 
 	// Try to grab publish information
@@ -50,7 +50,7 @@ func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	}
 
 	// Publish the service
-	raopName := hex.EncodeToString(iface.HardwareAddr) + "@" + name
+	raopName := hex.EncodeToString(iface.HardwareAddr) + "\\@" + name
 	err = ServiceRegister(raopName, "_raop._tcp", txt, uint16(port))
 	if err != nil {
 		return err
