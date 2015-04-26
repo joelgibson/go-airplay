@@ -132,12 +132,12 @@ func togo(err C.OSStatus) error {
 	}
 	return fmt.Errorf("OSError(%d)", err)
 }
-func (p *ALACPlayer) setup(fmtp []int) error {
+func (p *ALACPlayer) Setup(s *Session) error {
 	log.Println("setup")
 	p.Lock()
 	defer p.Unlock()
 	p.running = true
-	p.cookie = magicCookieFromFmtp(fmtp)
+	p.cookie = magicCookieFromFmtp(s.fmtp)
 
 	// Create Audio Queue for ALAC
 	var inFormat C.AudioStreamBasicDescription
@@ -163,9 +163,9 @@ func (p *ALACPlayer) setup(fmtp []int) error {
 	return nil
 }
 
-func (p *ALACPlayer) Play() error {
-	log.Println("Play")
-	defer log.Println("play done")
+func (p *ALACPlayer) Start() error {
+	log.Println("Start")
+	defer log.Println("Start done")
 	// Create input buffers, and enqueue using callback
 	for i := range p.buffers {
 		if err := togo(C.AudioQueueAllocateBufferWithPacketDescriptions(
@@ -184,23 +184,31 @@ func (p *ALACPlayer) Play() error {
 	return nil
 }
 
-func (p *ALACPlayer) Enqueue(data []byte) error {
+func (p *ALACPlayer) Write(orig []byte) (n int, err error) {
+	data := make([]byte, len(orig))
+	copy(data, orig)
 	p.Lock()
 	defer p.Unlock()
+
 	if p.running {
 		p.packetsin <- data
 	}
-	return nil
+	return len(data), nil
 }
 
 func (p *ALACPlayer) Flush() {
 	//p.Enqueue(nil)
 }
-func CreateALACPlayer(fmtp []int) (*ALACPlayer, error) {
+
+func SupportedCodecs() string {
+	return "0,1"
+}
+
+func CreateAudioSink(s *Session) (*ALACPlayer, error) {
 	var p ALACPlayer
 	p.packetsin = make(chan []byte, 1000)
 
-	if err := p.setup(fmtp); err != nil {
+	if err := p.Setup(s); err != nil {
 		p.Close()
 		return nil, err
 	}

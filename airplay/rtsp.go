@@ -117,7 +117,7 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 				start := strings.Index(line, "a=")
 				sep := strings.Index(line, ":")
 				if start == 0 && start < sep {
-					atags[line[2:sep]] = line[sep+1:]
+					atags[line[2:sep]] = strings.TrimSpace(line[sep+1:])
 				}
 			}
 			if fmtpstr, ok := atags["fmtp"]; ok {
@@ -136,7 +136,10 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 				}
 			} else {
 				log.Println("Did not get fmtp from ANNOUNCE")
-				return
+				//	return
+			}
+			if rtpmap, ok := atags["rtpmap"]; ok {
+				log.Println("rtpmap: ", rtpmap)
 			}
 			if rsaaeskey64, ok := atags["rsaaeskey"]; ok {
 				aeskey, err = aeskeyFromRsa(rsaaeskey64)

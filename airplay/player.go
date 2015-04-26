@@ -3,7 +3,8 @@ package airplay
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/binary"
+	//"encoding/binary"
+	"bufio"
 	"fmt"
 	"log"
 	"net"
@@ -11,7 +12,7 @@ import (
 
 type Session struct {
 	udpconn       *net.UDPConn
-	player        *ALACPlayer
+	player        AudioSink
 	aesiv, aeskey []byte
 	fmtp          []int
 }
@@ -20,6 +21,7 @@ var udp_port = 6000
 
 func NewSession(aesiv, aeskey []byte, fmtp []int) (s *Session, err error) {
 	s = &Session{aesiv: aesiv, aeskey: aeskey, fmtp: fmtp}
+	log.Printf("fmtp: %+v", fmtp)
 	udpaddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", udp_port))
 	if err != nil {
 		return nil, err
@@ -30,13 +32,13 @@ func NewSession(aesiv, aeskey []byte, fmtp []int) (s *Session, err error) {
 		return nil, err
 	}
 
-	s.player, err = CreateALACPlayer(fmtp)
+	s.player, err = CreateAudioSink(s)
 	if err != nil {
 		return nil, err
 	}
 	go s.loop()
 	go func() {
-		if err := s.player.Play(); err != nil {
+		if err := s.player.Start(); err != nil {
 			log.Println("here error")
 			log.Println(err)
 		}
@@ -55,10 +57,26 @@ func (s *Session) Close() {
 	s.player.Close()
 }
 
+type RTP struct {
+	Version     uint8 `bits:"2"`
+	Padding     bool  `bits:"1"`
+	Extension   bool  `bits:"1"`
+	CRSCcount   uint8 `bits:"4"`
+	Marker      bool  `bits:"1"`
+	PayloadType uint8 `bits:"7"`
+	Sequence    uint16
+	Timestamp   uint32
+	SSRC        uint32
+	CRSC        []uint32 `length:"CRSCcount"`
+}
+
 func (s *Session) loop() {
-	buf := make([]byte, 1024*16)
+	buf := make([]byte, 1420)
+	bin := s.udpconn //bufio.NewReaderSize(s.udpconn, 128*1024)
+	bout := bufio.NewWriterSize(s.player, 44100)
+
 	for {
-		n, _, err := s.udpconn.ReadFromUDP(buf)
+		n, err := bin.Read(buf)
 		if err != nil {
 			log.Println(err)
 			return
@@ -68,9 +86,7 @@ func (s *Session) loop() {
 			return
 		}
 		packet := buf[:n]
-		sequence := binary.BigEndian.Uint16(packet[2:])
-		_ = sequence
-		//		log.Println(sequence)
+		//		sequence := binary.BigEndian.Uint16(packet[2:])
 		audio := packet[12:]
 		todec := audio
 		block, err := aes.NewCipher(s.aeskey)
@@ -83,9 +99,7 @@ func (s *Session) loop() {
 			todec = todec[aes.BlockSize:]
 		}
 
-		send := make([]byte, len(audio))
-		copy(send, audio)
-		if err := s.player.Enqueue(send); err != nil {
+		if _, err := bout.Write(audio); err != nil {
 			log.Println(err)
 			return
 		}

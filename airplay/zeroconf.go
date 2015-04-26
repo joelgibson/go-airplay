@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/davecheney/mdns"
+	"regexp"
+	//	"github.com/miekg/dns"
 	"log"
+	"net"
 )
 
 // Register a DNS Service of name, service type stype, with txt record specified, on
@@ -12,19 +15,40 @@ import (
 // deregistered by calling ServiceDeregister(). I'm fairly sure that closing the program
 // causes the socket connection to mDNSResponder to be closed, which will also deregister
 // the services.
-func ServiceRegister(name, stype string, txt map[string]string, port uint16) error {
+func ServiceRegister(name, stype string, txt map[string]string, iface *net.Interface, port uint16) error {
 	txtblob, err := mapToBytes(txt)
 	if err != nil {
 		return err
 	}
 
+	addr, err := iface.Addrs()
+	if err != nil {
+		return err
+	}
+	var (
+		aa string
+		ab string
+	)
+	re := regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)\.(\d+)`)
+	for i := range addr {
+		add := addr[i].String()
+		if match := re.FindStringSubmatch(add); len(match) == 5 {
+			aa = match[4] + "." + match[3] + "." + match[2] + "." + match[1] + ".in-addr.arpa."
+			ab = match[0]
+			break
+		} else {
+			log.Println(match, add)
+		}
+	}
+	if len(aa) == 0 {
+		return fmt.Errorf("Couldn't parse interface address")
+	}
 	entries := []string{
 		stype + ".local. 10 IN PTR " + name + "." + stype + ".local.",
 		string(append([]byte(name+"."+stype+".local. 10 IN TXT "), txtblob...)),
 		fmt.Sprintf(name+"."+stype+".local. 10 IN SRV 0 0 %d arne.local.", port),
-		"arne.local. 10 IN AAAA fe80::3608:4ff:fe76:cea5",
-		"arne.local. 10 IN A 192.168.1.4",
-		"4.1.168.192.in-addr.arpa. 10 IN PTR arne.local.",
+		"arne.local. 10 IN A " + ab,
+		aa + " 10 IN A " + ab,
 		"_services._dns-sd._udp.local. 10 IN PTR " + name + "." + stype + ".local.",
 	}
 	for _, e := range entries {
@@ -34,6 +58,32 @@ func ServiceRegister(name, stype string, txt map[string]string, port uint16) err
 			return err
 		}
 	}
+	// "Announce" service by executing a query
+	// c, err := net.Dial("udp", "224.0.0.251:5353")
+	// if err != nil {
+	// 	return err
+	// }
+	// defer c.Close()
+	// var msg dns.Msg
+	// msg.SetQuestion("_raop._tcp.local.", dns.TypePTR)
+	// buf, err := msg.Pack()
+	// if err != nil {
+	// 	return err
+	// }
+	// log.Println("Write")
+	// if _, err = c.Write(buf); err != nil {
+	// 	return err
+	// }
+	// buf = make([]byte, 1500)
+	// log.Println("Read")
+	// n, err := c.Read(buf)
+	// log.Println("Unpack")
+	// if err != nil {
+	// 	return err
+	// } else if err = msg.Unpack(buf[:n]); err != nil {
+	// 	return err
+	// }
+	// log.Printf("Got:\n%s", msg.String())
 	return nil
 }
 
