@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	//	"sort"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -54,6 +55,8 @@ var knownMethods = map[string]bool{
 	"POST": true, "GET": true,
 }
 
+var s *Session
+
 // This is called from the server, and adopts a connection.
 func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 	// The session is persistent, so let's store some per-session stuff here.
@@ -62,14 +65,26 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 	// else for the key).
 	var fmtp []int
 	var aesiv, aeskey []byte
-	var s *Session
 
+	if s != nil {
+		log.Println(s.Close())
+		s = nil
+	}
 	log.Println(id, "-", conn.RemoteAddr(), "New connection")
 	defer func() {
 		log.Println(id, "-", "Server closing connection.")
 		conn.Close()
+		if s != nil {
+			log.Println(s.Close())
+			s = nil
+		}
 	}()
 
+	tmp := make([]string, 0)
+	for method := range knownMethods {
+		tmp = append(tmp, method)
+	}
+	methods := strings.Join(tmp, " ")
 	for {
 		req, resp, err := readRtspRequest(conn)
 		if err != nil {
@@ -105,11 +120,7 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 		// during connection setup.
 		switch req.method {
 		case "OPTIONS":
-			methods := make([]string, 0)
-			for method := range knownMethods {
-				methods = append(methods, method)
-			}
-			resp.headers["Public"] = strings.Join(methods, " ")
+			resp.headers["Public"] = methods
 		case "ANNOUNCE":
 			// Pull all of the a=xxx:yyyyy tags from the body
 			atags := make(map[string]string)
@@ -173,13 +184,14 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 			if err != nil {
 				log.Println(err)
 			}
+			log.Println("Setup done")
 			resp.headers["Transport"] = "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;"
 			resp.headers["Transport"] += ports
 			resp.headers["Session"] = "1" // This is necessary (why?)
 		case "RECORD":
 			resp.headers["Audio-Latency"] = "2205"
 		case "TEARDOWN":
-			s.Close()
+			log.Println(s.Close())
 			s = nil
 			resp.headers["Session"] = "1" // Is _this_ necessary?
 		case "FLUSH":
@@ -199,7 +211,21 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 			s.player.Flush()
 			resp.headers["Session"] = "1" // Is _this_ necessary?
 		case "SET_PARAMETER":
-			// Volume? Message player.
+			re := regexp.MustCompile(`volume: (-?\d+\.\d+)`)
+			match := re.FindStringSubmatch(string(req.body))
+			if len(match) == 2 {
+				log.Printf("\"%s\", \"%s\"", match[0], match[1])
+				v2, err := strconv.ParseFloat(match[1], 32)
+				if err == nil {
+					if v2 < -30 {
+						v2 = -30
+					}
+					log.Println("volume set to ", v2)
+					s.player.SetVolume(float32((30 + v2) / 30.0))
+				} else {
+					log.Println("couldn't set volume:", err)
+				}
+			}
 		default:
 			// No-op
 		}
