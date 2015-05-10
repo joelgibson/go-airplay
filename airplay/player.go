@@ -51,6 +51,7 @@ type (
 		aesiv, aeskey []byte
 		fmtp          []int
 		exp_seq       uint16
+		max_seq       uint16
 		bout          io.Writer
 	}
 )
@@ -73,7 +74,7 @@ func NewSession(aesiv, aeskey []byte, fmtp []int) (s *Session, err error) {
 		return nil, err
 	}
 
-	s.reresend = make(chan []byte)
+	s.reresend = make(chan []byte, 100)
 	udp_port += 10
 	s.udpconn, err = net.ListenUDP("udp", udpaddr)
 	if err != nil {
@@ -143,6 +144,9 @@ func (s *Session) ctrlloop() {
 		var rtp RTP
 		br.ReadInterface(&rtp)
 		if rtp.PayloadType == 86 {
+			if n < 1420 {
+				log.Printf("%+v", rtp)
+			}
 			s.reresend <- buf[4:n]
 		}
 		//		log.Printf("ctrl %d %+v", n, rtp)
@@ -177,22 +181,56 @@ func (s *Session) addAudio(packet []byte) error {
 	br := mb.BinaryReader{Reader: bytes.NewReader(packet), Endianess: mb.BigEndian}
 	var rtp RTP
 	br.ReadInterface(&rtp)
+
+	//log.Println("got package", rtp.Sequence)
+	if rtp.Sequence == 0 && len(packet) < 12 {
+		// TODO: what happens here really?
+		rtp.Sequence = binary.BigEndian.Uint16(packet)
+		log.Println("Bogus sequence??? 0 ->", rtp.Sequence)
+		if s.exp_seq < rtp.Sequence {
+			s.exp_seq = rtp.Sequence + 1
+			return nil
+		}
+	}
 	if rtp.Sequence < s.exp_seq {
 		return nil
 	}
 	//log.Printf("addAudio %+v", rtp)
 	//seq := binary.BigEndian.Uint16(packet[2:])
-	//log.Println(rtp.Sequence, seq)
-	if s.exp_seq != 0 && s.exp_seq != rtp.Sequence {
+	if s.exp_seq != 0 && s.exp_seq < rtp.Sequence {
 		// Oops, dropped a packet, request retransmission
-		s.rerequest(s.exp_seq, rtp.Sequence-s.exp_seq)
+		num := rtp.Sequence - s.exp_seq
+		if s.max_seq < rtp.Sequence {
+			s.max_seq = rtp.Sequence
+		} else {
+			num = 1
+		}
+		s.rerequest(s.exp_seq, num)
+		last_exp := s.exp_seq
+		reqCnt := 0
+	loop:
 		for s.exp_seq < rtp.Sequence {
-			log.Printf("Waiting for packet %d", s.exp_seq)
+			log.Printf("Have %d, waiting for packet %d", rtp.Sequence, s.exp_seq)
 			select {
 			case p2 := <-s.reresend:
-				s.addAudio(p2)
+				if len(p2) != 0 {
+					s.addAudio(p2)
+				} else {
+					// TODO: whyyyy?
+					break loop
+				}
 			case <-time.After(time.Millisecond * 100):
 				s.rerequest(s.exp_seq, 1)
+				if last_exp == s.exp_seq {
+					reqCnt++
+					if reqCnt > 10 {
+						log.Printf("Request limit reached for %d, giving up", s.exp_seq)
+						break loop
+					}
+				} else {
+					reqCnt = 0
+				}
+				last_exp = s.exp_seq
 			}
 		}
 		if s.exp_seq > rtp.Sequence {
@@ -201,6 +239,9 @@ func (s *Session) addAudio(packet []byte) error {
 		}
 	}
 	s.exp_seq = rtp.Sequence + 1
+	if len(packet) < 12 {
+		return nil
+	}
 	audio := packet[12:]
 	todec := audio
 	//AESDec.CryptBlocks(tmp, s.aesiv)
