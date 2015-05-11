@@ -201,7 +201,10 @@ func (s *Session) addAudio(packet []byte) error {
 		}
 	}
 	if rtp.Sequence < s.exp_seq {
-		return nil
+		if !(rtp.Sequence > 0 && s.exp_seq-rtp.Sequence > 4096) {
+			// We didn't wrap around, i.e.  we've already processed this Sequence
+			return nil
+		}
 	}
 	//log.Printf("addAudio %+v", rtp)
 	//seq := binary.BigEndian.Uint16(packet[2:])
