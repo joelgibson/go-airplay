@@ -2,6 +2,7 @@ package alsa
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -12,12 +13,19 @@ import (
 )
 
 const (
-	period_size         = 512
-	period_count        = 8
-	buffers             = 256
-	max                 = period_size * 2 * 2
-	initial_buffer_size = 44100 * 2 * 2
+	period_size  = 512
+	period_count = 8
+	buffers      = 256
+	max          = period_size * 2 * 2
 )
+
+var (
+	initial_buffer_size = 44100 * 2 * 2 * 2
+)
+
+func init() {
+	flag.IntVar(&initial_buffer_size, "ia", initial_buffer_size, "Amount of buffering before starting playback")
+}
 
 type (
 	Config struct {

@@ -53,6 +53,7 @@ type (
 		exp_seq       uint16
 		max_seq       uint16
 		bout          io.Writer
+		depth         uint16
 	}
 )
 
@@ -172,6 +173,8 @@ func (s *Session) rerequest(start, num uint16) {
 }
 
 func (s *Session) addAudio(packet []byte) error {
+	s.depth++
+	defer func() { s.depth-- }()
 	block, err := aes.NewCipher(s.aeskey)
 	if err != nil {
 		panic(err)
@@ -182,7 +185,12 @@ func (s *Session) addAudio(packet []byte) error {
 	var rtp RTP
 	br.ReadInterface(&rtp)
 
-	//log.Println("got package", rtp.Sequence)
+	if rtp.Sequence > 0 && s.max_seq-rtp.Sequence > 4096 {
+		// Wrapped...
+		s.max_seq = rtp.Sequence
+	} else if rtp.Sequence < s.max_seq {
+		log.Println("got package", rtp.Sequence)
+	}
 	if rtp.Sequence == 0 && len(packet) < 12 {
 		// TODO: what happens here really?
 		rtp.Sequence = binary.BigEndian.Uint16(packet)
@@ -197,30 +205,32 @@ func (s *Session) addAudio(packet []byte) error {
 	}
 	//log.Printf("addAudio %+v", rtp)
 	//seq := binary.BigEndian.Uint16(packet[2:])
-	if s.exp_seq != 0 && s.exp_seq < rtp.Sequence {
+	if s.exp_seq != 0 && s.exp_seq < rtp.Sequence && (rtp.Sequence-s.exp_seq) < 50 {
 		// Oops, dropped a packet, request retransmission
-		num := rtp.Sequence - s.exp_seq
+		//		num := rtp.Sequence - s.exp_seq
 		if s.max_seq < rtp.Sequence {
+			s.rerequest(s.exp_seq, rtp.Sequence-s.exp_seq)
 			s.max_seq = rtp.Sequence
-		} else {
-			num = 1
+		} else if s.depth == 2 {
+			//				num = 1
+			s.rerequest(s.exp_seq, 1)
 		}
-		s.rerequest(s.exp_seq, num)
+		//	}
 		last_exp := s.exp_seq
 		reqCnt := 0
 	loop:
 		for s.exp_seq < rtp.Sequence {
+			//			s.rerequest(s.exp_seq, 1)
 			log.Printf("Have %d, waiting for packet %d", rtp.Sequence, s.exp_seq)
 			select {
 			case p2 := <-s.reresend:
-				if len(p2) != 0 {
-					s.addAudio(p2)
-				} else {
-					// TODO: whyyyy?
-					break loop
-				}
+				s.addAudio(p2)
 			case <-time.After(time.Millisecond * 100):
-				s.rerequest(s.exp_seq, 1)
+				if s.depth == 1 {
+					s.rerequest(s.exp_seq, rtp.Sequence-s.exp_seq)
+				} else {
+					s.rerequest(s.exp_seq, 1)
+				}
 				if last_exp == s.exp_seq {
 					reqCnt++
 					if reqCnt > 10 {
