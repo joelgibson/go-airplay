@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net"
+	//	"sort"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -17,20 +19,20 @@ import (
 // assumed that it follows the RTSP definition, namely that the CSeq header is
 // present.
 type RtspRequest struct {
-	method string
-	uri string
-	proto string
+	method  string
+	uri     string
+	proto   string
 	headers map[string]string
-	head []byte
-	body []byte
-	data []byte
+	head    []byte
+	body    []byte
+	data    []byte
 }
 
 // This is a response, to be sent from the server to the client.
 type RtspResponse struct {
-	status int
+	status  int
 	headers map[string]string
-	data []byte
+	data    []byte
 }
 
 // Renders a response, to be output back.
@@ -48,33 +50,48 @@ func (r *RtspResponse) Render() []byte {
 var headsep = []byte("\r\n\r\n")
 var knownMethods = map[string]bool{
 	"ANNOUNCE": true, "SETUP": true, "RECORD": true,
-  "PAUSE": true, "FLUSH": true, "TEARDOWN": true,
+	"PAUSE": true, "FLUSH": true, "TEARDOWN": true,
 	"OPTIONS": true, "GET_PARAMETER": true, "SET_PARAMETER": true,
-  "POST": true, "GET": true,
+	"POST": true, "GET": true,
 }
+
+var s *Session
 
 // This is called from the server, and adopts a connection.
 func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 	// The session is persistent, so let's store some per-session stuff here.
 	// These should be either nil (indicating have not been filled yet), or
 	// their correct lengths (12 for fmtp, aes.BlockSize for the iv, whatever
-  // else for the key).
+	// else for the key).
 	var fmtp []int
 	var aesiv, aeskey []byte
 
+	if s != nil {
+		log.Println(s.Close())
+		s = nil
+	}
 	log.Println(id, "-", conn.RemoteAddr(), "New connection")
 	defer func() {
 		log.Println(id, "-", "Server closing connection.")
 		conn.Close()
+		if s != nil {
+			log.Println(s.Close())
+			s = nil
+		}
 	}()
 
+	tmp := make([]string, 0)
+	for method := range knownMethods {
+		tmp = append(tmp, method)
+	}
+	methods := strings.Join(tmp, " ")
 	for {
 		req, resp, err := readRtspRequest(conn)
 		if err != nil {
 			if err == io.EOF {
 				log.Println(id, "-", "Client closed connection.")
 			} else {
-				log.Println(id, "-", "Socket error:", err);
+				log.Println(id, "-", "Socket error:", err)
 			}
 			return
 		}
@@ -84,11 +101,13 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 		if _, ok := req.headers["Apple-Challenge"]; ok {
 			present = "Apple-Challenge present"
 		}
-		log.Println(id, "-", req.method, req.uri, req.proto, present)
+		log.Println(id, "-", req.method, req.uri, req.proto, string(req.body), present)
 		Debug.Print("From client:\n", string(req.data))
 
 		// Let's just auto-reply to any challenge that comes our way.
 		if challenge, ok := req.headers["Apple-Challenge"]; ok {
+			log.Println(conn.LocalAddr())
+			log.Println(conn.RemoteAddr())
 			response, err := appleResponse(challenge, conn.LocalAddr())
 			if err != nil {
 				log.Print("Could not make sense of Apple-Challenge" + challenge)
@@ -101,12 +120,7 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 		// during connection setup.
 		switch req.method {
 		case "OPTIONS":
-			methods := make([]string, 0)
-			for method := range knownMethods {
-				methods = append(methods, method)
-			}
-			resp.headers["Public"] = strings.Join(methods, " ")
-
+			resp.headers["Public"] = methods
 		case "ANNOUNCE":
 			// Pull all of the a=xxx:yyyyy tags from the body
 			atags := make(map[string]string)
@@ -114,7 +128,7 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 				start := strings.Index(line, "a=")
 				sep := strings.Index(line, ":")
 				if start == 0 && start < sep {
-					atags[line[2:sep]] = line[sep+1:]
+					atags[line[2:sep]] = strings.TrimSpace(line[sep+1:])
 				}
 			}
 			if fmtpstr, ok := atags["fmtp"]; ok {
@@ -133,7 +147,10 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 				}
 			} else {
 				log.Println("Did not get fmtp from ANNOUNCE")
-				return
+				//	return
+			}
+			if rtpmap, ok := atags["rtpmap"]; ok {
+				log.Println("rtpmap: ", rtpmap)
 			}
 			if rsaaeskey64, ok := atags["rsaaeskey"]; ok {
 				aeskey, err = aeskeyFromRsa(rsaaeskey64)
@@ -162,13 +179,20 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 			}
 
 		case "SETUP":
+			ports := fmt.Sprintf("server_port=%d;control_port=%d;timing_port=%d", udp_port, udp_port+1, udp_port+2)
+			s, err = NewSession(aesiv, aeskey, fmtp)
+			if err != nil {
+				log.Println(err)
+			}
+			log.Println("Setup done")
 			resp.headers["Transport"] = "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;"
-			resp.headers["Transport"] += "server_port=6000;control_port=6001;timing_port=6002"
+			resp.headers["Transport"] += ports
 			resp.headers["Session"] = "1" // This is necessary (why?)
 		case "RECORD":
 			resp.headers["Audio-Latency"] = "2205"
-			go writeUdp(aesiv, aeskey, fmtp)
 		case "TEARDOWN":
+			log.Println(s.Close())
+			s = nil
 			resp.headers["Session"] = "1" // Is _this_ necessary?
 		case "FLUSH":
 			// There is a header like "RTP-Info: seq=25639;rtptime=4037478127". We can probably
@@ -177,16 +201,31 @@ func RtspSession(id string, conn net.Conn, playerfn func(chan string)) {
 			if info, ok := req.headers["RTP-Info"]; ok {
 				if idx := strings.Index(info, "seq="); idx >= 0 {
 					if no, err := strconv.Atoi(info[idx:strings.Index(info, ";")]); err != nil {
-							seq = no
+						seq = no
 					}
 				}
 			}
 
 			// Should flush the buffer here?
-			Debug.Println("Seq:", seq);
-
+			Debug.Println("Seq:", seq)
+			s.player.Flush()
+			resp.headers["Session"] = "1" // Is _this_ necessary?
 		case "SET_PARAMETER":
-			// Volume? Message player.
+			re := regexp.MustCompile(`volume: (-?\d+\.\d+)`)
+			match := re.FindStringSubmatch(string(req.body))
+			if len(match) == 2 {
+				log.Printf("\"%s\", \"%s\"", match[0], match[1])
+				v2, err := strconv.ParseFloat(match[1], 32)
+				if err == nil {
+					if v2 < -30 {
+						v2 = -30
+					}
+					log.Println("volume set to ", v2)
+					s.player.SetVolume(float32((30 + v2) / 30.0))
+				} else {
+					log.Println("couldn't set volume:", err)
+				}
+			}
 		default:
 			// No-op
 		}
@@ -224,7 +263,7 @@ func readRtspRequest(conn net.Conn) (*RtspRequest, *RtspResponse, error) {
 	// Split the header off, and check for prescence of method, uri, protocol.
 	req.data = buffer[:nread]
 	req.head = buffer[:bytes.Index(buffer[:nread], headsep)]
-	req.body = buffer[len(req.head) + len(headsep):]
+	req.body = buffer[len(req.head)+len(headsep):]
 	lines := strings.Split(string(req.head), "\r\n")
 	parts := strings.Fields(lines[0])
 	if len(parts) != 3 {
@@ -254,7 +293,9 @@ func readRtspRequest(conn net.Conn) (*RtspRequest, *RtspResponse, error) {
 
 	// Check to see if we have a body we need to read more of.
 	bodylen, err := strconv.Atoi(req.headers["Content-Length"])
-	if err != nil { bodylen = 0 }
+	if err != nil {
+		bodylen = 0
+	}
 
 	// At the moment just reject if it's longer than the buffer
 	if len(req.body) < bodylen {

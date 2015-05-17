@@ -2,6 +2,7 @@ package airplay
 
 import (
 	"encoding/hex"
+	"flag"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -19,7 +20,7 @@ var txt map[string]string = map[string]string{
 	"tp":      "UDP",
 	"sm":      "false",
 	"ek":      "1",
-	"cn":      "0,1",
+	"cn":      SupportedCodecs(),
 	"ch":      "2",
 	"ss":      "16",
 	"sr":      "44100",
@@ -27,11 +28,20 @@ var txt map[string]string = map[string]string{
 	"et":      "0,1",
 }
 
+var iface *net.Interface
+var (
+	address   = ":49153"
+	ifacename = "eth0"
+)
+
+func init() {
+	flag.StringVar(&address, "addr", address, "Address to use")
+	flag.StringVar(&ifacename, "if", ifacename, "Network interface to use")
+}
+
 // ServeAirtunes will start advertising an RAOP service, and start listening for
 // incoming connections, calling the player in a new goroutine when appropriate.
 func ServeAirTunes(name string, handler func(string, net.Conn)) error {
-	address := ":49152"
-	ifacename := "en1"
 
 	// Try to grab publish information
 	_, portstr, err := net.SplitHostPort(address)
@@ -42,14 +52,14 @@ func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	if err != nil {
 		return err
 	}
-	iface, err := net.InterfaceByName(ifacename)
+	iface, err = net.InterfaceByName(ifacename)
 	if err != nil {
 		return err
 	}
 
 	// Publish the service
-	raopName := hex.EncodeToString(iface.HardwareAddr) + "@" + name
-	err = ServiceRegister(raopName, "_raop._tcp", txt, uint16(port))
+	raopName := hex.EncodeToString(iface.HardwareAddr) + "\\@" + name
+	err = ServiceRegister(raopName, "_raop._tcp", txt, iface, uint16(port))
 	if err != nil {
 		return err
 	}
@@ -57,7 +67,7 @@ func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	log.Println("Service", raopName, "registered on address", address)
 
 	// Bind the port
-	ln, err := net.Listen("tcp", address)
+	ln, err := net.Listen("tcp4", address)
 	if err != nil {
 		return err
 	}
@@ -68,10 +78,10 @@ func ServeAirTunes(name string, handler func(string, net.Conn)) error {
 	for {
 		id := strconv.Itoa(rand.Int())
 		conn, err := ln.Accept()
+		log.Println("accepted connection!")
 		if err != nil {
 			return err
 		}
 		go handler(id, conn)
 	}
 }
-

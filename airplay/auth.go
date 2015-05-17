@@ -14,15 +14,18 @@ import (
 
 // Set up the private key, from the super_secret_key at the bottom of this file.
 var rsaPrivKey *rsa.PrivateKey
+
 func init() {
-	pemblock, _ := pem.Decode([]byte(super_secret_key))
+	pemblock, rest := pem.Decode([]byte(super_secret_key))
+	if len(rest) != 0 {
+		log.Fatalln(string(rest))
+	}
 	key, err := x509.ParsePKCS1PrivateKey(pemblock.Bytes)
 	if err != nil {
 		log.Fatalln("Private key could not be parsed:", err)
 	}
 	rsaPrivKey = key
 }
-
 
 // Will add in padding on strings lacking it.
 func base64pad(s string) string {
@@ -31,6 +34,7 @@ func base64pad(s string) string {
 	}
 	return s
 }
+
 // Removes all = signs from the back of a string
 func base64unpad(s string) string {
 	if idx := strings.Index(s, "="); idx >= 0 {
@@ -46,22 +50,27 @@ func appleResponse(challenge string, addr net.Addr) (c64 string, err error) {
 	// iTunes seems to not pad things. Let's fix that.
 	p64 := base64pad(challenge)
 	ptext, err := base64.StdEncoding.DecodeString(p64)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	ptext = append(ptext, GetIP(addr)...)
-	ptext = append(ptext, GetMAC(addr)...)
-	for len(ptext) < 0x20 { ptext = append(ptext, 0) }
+	ptext = append(ptext, iface.HardwareAddr...)
+	for len(ptext) < 0x20 {
+		ptext = append(ptext, 0)
+	}
 
-	ctext, err := rsa.SignPKCS1v15(nil, rsaPrivKey, crypto.Hash(0), ptext)
+	_ = crypto.MD4
+	ctext, err := rsa.SignPKCS1v15(nil, rsaPrivKey, 0, ptext)
 	if err != nil {
 		return
 	}
 	c64 = base64.StdEncoding.EncodeToString(ctext)
 
 	// We should respond in kind to iTunes
-	if len(p64) != len(challenge) {
-		c64 = base64unpad(c64)
-	}
+	// if len(p64) != len(challenge) {
+	// 	c64 = base64unpad(c64)
+	// }
 
 	return
 }
@@ -101,4 +110,3 @@ cJyRM9SJ7OKlGt0FMSdJD5KG0XPIpAVNwgpXXH5MDJg09KHeh0kXo+QA6viFBi21y340NonnEfdf
 LAuE4Pu13aKiJnfft7hIjbK+5kyb3TysZvoyDnb3HOKvInK7vXbKuU4ISgxB2bB3HcYzQMGsz1qJ
 2gG0N5hvJpzwwhbhXqFKA4zaaSrw622wDniAK5MlIE0tIAKKP4yxNGjoD2QYjhBGuhvkWKY=
 -----END RSA PRIVATE KEY-----`
-
