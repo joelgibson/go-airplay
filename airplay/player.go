@@ -1,7 +1,6 @@
 package airplay
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
@@ -13,6 +12,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -52,13 +52,14 @@ type (
 		fmtp          []int
 		exp_seq       uint16
 		max_seq       uint16
-		bout          io.Writer
 		depth         uint16
+		ctrlf         io.WriteCloser
+		ctrlm         sync.Mutex
 	}
 )
 
 var (
-	udp_port     = 6000
+	udp_port     = 6100
 	session_save = false
 )
 
@@ -91,7 +92,6 @@ func NewSession(aesiv, aeskey []byte, fmtp []int) (s *Session, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s.bout = bufio.NewWriterSize(s.player, 1420*2)
 
 	go s.loop()
 	go func() {
@@ -117,16 +117,15 @@ func (s *Session) Close() error {
 
 func (s *Session) ctrlloop() {
 	var (
-		f   io.WriteCloser
 		err error
 	)
 	if session_save {
-		f, err = os.Create(fmt.Sprintf("session_ctrl_%d.dump", udp_port))
+		s.ctrlf, err = os.Create(fmt.Sprintf("session_ctrl_%d.dump", udp_port))
 		if err != nil {
 			log.Println(err)
-			f = nil
+			s.ctrlf = nil
 		}
-		defer f.Close()
+		defer s.ctrlf.Close()
 	}
 	tmp := make([]byte, 4)
 	for {
@@ -136,18 +135,17 @@ func (s *Session) ctrlloop() {
 			log.Println(err)
 			return
 		}
-		if session_save && f != nil {
+		if session_save && s.ctrlf != nil {
 			binary.LittleEndian.PutUint32(tmp, uint32(n))
-			f.Write(tmp[:4])
-			f.Write(buf[:n])
+			s.ctrlm.Lock()
+			s.ctrlf.Write(tmp[:4])
+			s.ctrlf.Write(buf[:n])
+			s.ctrlm.Unlock()
 		}
 		br := mb.BinaryReader{Reader: bytes.NewReader(buf), Endianess: mb.BigEndian}
 		var rtp RTP
 		br.ReadInterface(&rtp)
 		if rtp.PayloadType == 86 {
-			if n < 1420 {
-				log.Printf("%+v", rtp)
-			}
 			s.reresend <- buf[4:n]
 		}
 		//		log.Printf("ctrl %d %+v", n, rtp)
@@ -165,6 +163,15 @@ func (s *Session) rerequest(start, num uint16) {
 	binary.BigEndian.PutUint16(data[4:], start)
 	binary.BigEndian.PutUint16(data[6:], num)
 	log.Printf("rerequesting: %d->%d (%s)", start, start+num, s.ctrladdr.String())
+	if session_save && s.ctrlf != nil {
+		s.ctrlm.Lock()
+		tmp := make([]byte, 4)
+		binary.LittleEndian.PutUint32(tmp, uint32(len(data)))
+		s.ctrlf.Write(tmp)
+		s.ctrlf.Write(data)
+		s.ctrlm.Unlock()
+	}
+
 	// br := mb.BinaryReader{Reader: bytes.NewReader(data), Endianess: mb.BigEndian}
 	// var rtp RTP
 	// log.Println(br.ReadInterface(&rtp))
@@ -188,8 +195,8 @@ func (s *Session) addAudio(packet []byte) error {
 	if rtp.Sequence > 0 && s.max_seq-rtp.Sequence > 4096 {
 		// Wrapped...
 		s.max_seq = rtp.Sequence
-	} else if rtp.Sequence < s.max_seq {
-		log.Println("got package", rtp.Sequence)
+		// } else if rtp.Sequence < s.max_seq {
+		// 	log.Println("got package", rtp.Sequence)
 	}
 	if rtp.Sequence == 0 && len(packet) < 12 {
 		// TODO: what happens here really?
@@ -224,7 +231,7 @@ func (s *Session) addAudio(packet []byte) error {
 	loop:
 		for s.exp_seq < rtp.Sequence {
 			//			s.rerequest(s.exp_seq, 1)
-			log.Printf("Have %d, waiting for packet %d", rtp.Sequence, s.exp_seq)
+			//	log.Printf("Have %d, waiting for packet %d", rtp.Sequence, s.exp_seq)
 			select {
 			case p2 := <-s.reresend:
 				s.addAudio(p2)
@@ -263,7 +270,7 @@ func (s *Session) addAudio(packet []byte) error {
 		todec = todec[aes.BlockSize:]
 	}
 
-	_, err = s.bout.Write(audio)
+	_, err = s.player.Write(audio)
 	return err
 }
 
@@ -291,7 +298,7 @@ func (s *Session) loop() {
 		log.Println(binary.Write(f, binary.LittleEndian, s.aeskey))
 	}
 	buf := make([]byte, 1420)
-	bin := s.udpconn //bufio.NewReaderSize(s.udpconn, 128*1024)
+	bin := s.udpconn // bufio.NewReaderSize(s.udpconn, len(buf)*10)
 	tmp := make([]byte, 4)
 	for {
 		n, err := bin.Read(buf)

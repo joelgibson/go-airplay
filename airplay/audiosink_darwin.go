@@ -132,6 +132,16 @@ func togo(err C.OSStatus) error {
 	}
 	return fmt.Errorf("OSError(%d)", err)
 }
+
+func (p *ALACPlayer) SetVolume(vol float32) {
+	C.AudioQueueSetParameter(p.queue, C.kAudioQueueParam_Volume, C.AudioQueueParameterValue(vol))
+}
+
+func (p *ALACPlayer) Volume() (vol float32) {
+	C.AudioQueueGetParameter(p.queue, C.kAudioQueueParam_Volume, (*C.AudioQueueParameterValue)(&vol))
+	return
+}
+
 func (p *ALACPlayer) Setup(s *Session) error {
 	log.Println("setup")
 	p.Lock()
@@ -201,7 +211,7 @@ func (p *ALACPlayer) Flush() {
 }
 
 func SupportedCodecs() string {
-	return "0,1"
+	return "1"
 }
 
 func CreateAudioSink(s *Session) (*ALACPlayer, error) {
